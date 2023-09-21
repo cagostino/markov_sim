@@ -28,28 +28,36 @@ class MarkovSimulator:
         self.history = []
 
 
-    def likelihood(self, params):
+    def likelihood(self, params, fn = None, X=None, y=None):
         """Computes the likelihood of the parameters."""
-        diff = params - np.array([p.value for p in self.parameters.values()])
-        return np.exp(-0.5 * np.dot(diff, np.linalg.inv(self.cov_matrix).dot(diff)))
-
+        if fn is None:
+            diff = params - np.array([p.value for p in self.parameters.values()])
+            likelihood = np.exp(-0.5 * np.dot(diff, np.linalg.inv(self.cov_matrix).dot(diff)))
+        else:
+            likelihood = fn(params, X,y)
+        print(likelihood)
+        return likelihood
     def update_param(self, param):
         """Updates the parameter based on a random walk."""
         step = np.random.normal(0, 0.1)
         param.value = min(max(param.value + step, param.min), param.max)
-    def run_simulation(self, n_steps):
-        """Runs the Markov chain simulation for a given number of steps."""
+    def run_simulation(self, n_steps, fn=None, X=None, y=None):
+        accepted = 0
+        current_log_lh = self.likelihood([p.value for p in self.parameters.values()], fn=fn, X=X, y=y)
+        
         for _ in range(n_steps):
-            current_params = [p.value for p in self.parameters.values()]
-            if not self.likelihood(current_params):
-                continue
-
-            for param in self.parameters.values():
-                if param.vary:
-                    self.update_param(param)
+            proposed_params = [p.value + np.random.normal(0, 0.1) for p in self.parameters.values()]
+            proposed_log_lh = self.likelihood(proposed_params, fn=fn, X=X, y=y)
             
-            self.history.append({name: param.value for name, param in self.parameters.items()})
-
+            alpha = min(0, proposed_log_lh - current_log_lh)  # Since we're working with logs
+            if np.log(np.random.rand()) < alpha:
+                accepted += 1
+                for name, param in zip(self.parameters.keys(), proposed_params):
+                    self.parameters[name].value = param
+                current_log_lh = proposed_log_lh
+                self.history.append({name: param for name, param in zip(self.parameters.keys(), proposed_params)})
+        
+        print(f"Accepted Steps: {accepted}/{n_steps}")
         return pd.DataFrame(self.history)
 
     def propose_step(self):
@@ -63,3 +71,36 @@ class MarkovSimulator:
         if np.random.rand() < alpha:
             self.params = proposed_params
             
+
+# Assuming you've already defined the Parameter class and MarkovSimulator from your previous code...
+
+# Generate some sample data
+np.random.seed(42)
+x = np.linspace(0, 10, 100)
+y = 2.5 * x + 1.5 + np.random.normal(0, 2, 100)
+
+# Initialize parameter configurations
+param_configs = {
+    'm': {'value': 1.0, 'min': -10, 'max': 10, 'vary': True},
+    'c': {'value': 0.0, 'min': -10, 'max': 10, 'vary': True},
+    'sigma': {'value': 2.0, 'min': 0.1, 'max': 10, 'vary': True}
+}
+# When running the simulation, make sure to pass the correct likelihood function and data
+
+def linear_regression_likelihood(params, X, y):
+    if len(params) != 3:
+        raise ValueError(f"Expected 3 parameters for linear regression (intercept, slope, sigma), but got {len(params)}")
+    
+    intercept, slope, sigma = params
+    y_pred = intercept + X * slope
+    residuals = y - y_pred
+    rss = np.sum(residuals**2)
+    
+    # Assuming Gaussian errors
+    n = len(y)
+    log_likelihood = -0.5 * n * np.log(2 * np.pi * sigma**2) - rss / (2 * sigma**2)
+    return log_likelihood
+simulator = MarkovSimulator(param_configs)
+
+history = simulator.run_simulation(100000, fn=linear_regression_likelihood, X=x, y=y)
+
