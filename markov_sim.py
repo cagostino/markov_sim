@@ -169,3 +169,83 @@ for i, param_name in enumerate(simulator.parameters):
     plt.title(f"Distribution for {param_name}")
 plt.tight_layout()
 plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def leaky_box_model(params, dt, M_prev, MZ_prev):
+    """Simulate the leaky box model given a set of parameters."""
+    M_galaxy, M_in, SFR, Z_in, M_out = params
+    dM = M_in - SFR - M_out
+    Z_prev = MZ_prev / M_prev
+    dMZ = Z_in * M_in - Z_prev * SFR
+    return M_prev + dM*dt, MZ_prev + dMZ*dt
+
+# Example Usage
+param_configs = {
+    'log_M_total': {'value': np.log10(1e10), 'min': np.log10(1e9), 'max': np.log10(1e11), 'vary': True, 'expr': 'log10(10**log_M_stellar + 10**log_M_gas + 10**log_M_in - 10**log_M_out)'},
+    'log_M_stellar': {'value': np.log10(1e9), 'min': np.log10(1e8), 'max': np.log10(1e10), 'vary': True, 'expr': 'log10(10**log_SFR * dt)'},
+    'log_M_gas': {'value': np.log10(9e9), 'min': np.log10(1e8), 'max': np.log10(1e10), 'vary': True, 'expr': 'log10(10**log_M_in - 10**log_M_out - 10**log_SFR * dt)'},
+    'log_M_in': {'value': np.log10(1e9), 'min': np.log10(1e8), 'max': np.log10(1e10), 'vary': True},
+    'log_SFR': {'value': np.log10(1), 'min': np.log10(1e-4), 'max': np.log10(1e4), 'vary': True, 'expr': ''} ,
+    'Z_in': {'value': np.log10(0.01), 'min': -6, 'max': 0, 'vary': False},
+    'log_M_out': {'value': np.log10(1e9), 'min': np.log10(1e8), 'max': np.log10(1e10), 'vary': True},
+
+}
+param_configs.update({
+    'morphology': {'value': 0.5, 'min': 0, 'max': 1, 'vary': True},
+    'P_merger': {'value': 0.01, 'min': 0, 'max': 1, 'vary': False},
+    'AGN_activity': {'value': 0.5, 'min': 0, 'max': 1, 'vary': False},
+    'log_M_out_agn': {'value': np.log10(1e8), 'min': np.log10(1e7), 'max': np.log10(1e9), 'vary': True, 'expr': 'log10(beta * AGN_activity)'},
+    'log_M_out_stellar': {'value': np.log10(1e8), 'min': np.log10(1e7), 'max': np.log10(1e9), 'vary': True, 'expr': 'log10(gamma * log_SFR)'},
+    'log_M_out': {'value': np.log10(2e8), 'min': np.log10(1e7), 'max': np.log10(2e9), 'vary': True, 'expr': 'log10(10**log_M_out_agn + 10**log_M_out_stellar)'
+                  
+                  },
+    'log_sigma': {'value': 2, 'min': 1, 'max': 3, 'vary': True, 'expr': 'log_sigma + alpha*log_M_out'},
+    'log_SFE': {'value': -9, 'min': -12, 'max': -6, 'vary': True, 'expr': 'log_SFR - log_M_gas'}
+    
+    
+    # Just an example range, adjust as needed
+})
+
+# Modify the existing log_SFR expression to incorporate efficiency and morphology
+threshold = 2.5  # This is an example threshold for the velocity dispersion's impact on efficiency. Adjust as needed.
+efficiency_expr = f"log(exp(-log_sigma / {threshold}))"
+morphology_factor_expr = "0.5 + 0.5 * morphology"
+new_SFR_expr = f"({param_configs['log_SFR']['expr']} + {efficiency_expr}) * {morphology_factor_expr}"
+
+param_configs['log_SFR']['expr'] = new_SFR_expr
+
+simulator = MarkovSimulator(param_configs)
+
+# Assuming X as time intervals (like [0.1, 0.1, ...] for time steps of 0.1 Gyr) and 
+# y as observed data ([M_obs, MZ_obs]) for each time step.
+
+history = simulator.run_simulation(100000)
+
+import matplotlib.pyplot as plt
+plt.ion()
+def plot2dhist(x, y, ax=None, **kwargs):
+    if ax is None:
+        ax = plt.gca()
+    ax.hist2d(x, y, **kwargs)
+    ax.set_xlabel(x.name)
+    ax.set_ylabel(y.name)
+    ax.set_aspect('equal')
+    return ax
