@@ -71,6 +71,37 @@ class MarkovSimulator:
         if np.random.rand() < alpha:
             self.params = proposed_params
             
+import emcee
+
+class MarkovSimulatorEmcee:
+    def __init__(self, param_configs):
+        self.parameters = {name: Parameter(name=name, **config) for name, config in param_configs.items()}
+        self.ndim = len(self.parameters)
+
+    def log_prior(self, params):
+        for param, value in zip(self.parameters.values(), params):
+            if not param.min <= value <= param.max:
+                return -np.inf  # Log of 0
+        return 0  # Log of 1
+
+    def log_likelihood(self, params, fn, X, y):
+        if fn is None:
+            diff = params - np.array([p.value for p in self.parameters.values()])
+            return -0.5 * np.dot(diff, diff)
+        else:
+            return fn(params, X, y)
+
+    def log_posterior(self, params, fn, X, y):
+        lp = self.log_prior(params)
+        if not np.isfinite(lp):
+            return -np.inf
+        return lp + self.log_likelihood(params, fn, X, y)
+
+    def run_simulation(self, n_steps, n_walkers, fn, X, y):
+        initial_positions = [np.array([p.value for p in self.parameters.values()]) + 1e-4*np.random.randn(self.ndim) for i in range(n_walkers)]
+        sampler = emcee.EnsembleSampler(n_walkers, self.ndim, self.log_posterior, args=[fn, X, y])
+        sampler.run_mcmc(initial_positions, n_steps, progress=True)
+        return sampler.chain
 
 # Assuming you've already defined the Parameter class and MarkovSimulator from your previous code...
 
@@ -104,3 +135,37 @@ simulator = MarkovSimulator(param_configs)
 
 history = simulator.run_simulation(100000, fn=linear_regression_likelihood, X=x, y=y)
 
+
+
+##emcee example
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import emcee
+
+# Generate some synthetic data
+np.random.seed(42)
+x = np.linspace(0, 10, 100)
+y = 3 * x + 2 + np.random.normal(0, 2, size=len(x))
+
+param_configs = {
+    'intercept': {'value': 1.0, 'min': -10, 'max': 10},
+    'slope': {'value': 1.0, 'min': 0, 'max': 5},
+    'sigma': {'value': 1.5, 'min': 0.1, 'max': 5}
+}
+
+simulator = MarkovSimulatorEmcee(param_configs)
+chain = simulator.run_simulation(n_steps=5000, n_walkers=32, fn=linear_regression_likelihood, X=x, y=y)
+
+# Taking the last 100 steps of each walker
+samples = chain[:, -100:, :].reshape((-1, simulator.ndim))
+
+# Plotting the samples
+plt.figure(figsize=(10, 6))
+for i, param_name in enumerate(simulator.parameters):
+    plt.subplot(simulator.ndim, 1, i+1)
+    plt.hist(samples[:, i], bins=50, alpha=0.6)
+    plt.title(f"Distribution for {param_name}")
+plt.tight_layout()
+plt.show()
